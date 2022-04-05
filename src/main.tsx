@@ -256,6 +256,11 @@ function reconcileChildren(wipFiber: Fiber, elements: any[]) {
 			deletions.push(oldFiber);
 		}
 
+		if (oldFiber) {
+			// 如果是处理对比旧 Fiber 的话，完成当前元素对比之后将对比移动到 sibling 元素
+			oldFiber = oldFiber.sibling;
+		}
+
 		if (newFiber) {
 			if (index === 0) {
 				wipFiber.child = newFiber;
