@@ -136,22 +136,40 @@ function commitWork(fiber: Fiber) {
 		return;
 	}
 
-	const domParent = fiber?.parent?.dom;
+	// 处理函数组件没有 dom 需要向上找到离函数组件最近的一个父元素的 dom
+	let domParentFiber = fiber?.parent;
+
+	// FIXME: 这里不判空父元素的话渲染 root 会导致直接死循环，但是 pomber/didact 代码中好像没问题
+	while (domParentFiber && !domParentFiber?.dom) {
+		domParentFiber = domParentFiber?.parent;
+	}
+
+	const domParent = domParentFiber?.dom;
 
 	// 按顺序（ self > child > sibling ）递归渲染元素到 DOM 上
 	if (fiber.effectTag === 'PLACEMENT' && fiber.dom != null) {
 		// fiber 标识为 PLACEMENT 将元素添加到父元素
-		domParent.appendChild(fiber.dom);
+		domParent?.appendChild(fiber.dom);
 	} else if (fiber.effectTag === 'UPDATE' && fiber.dom != null) {
 		// fiber 标识为 UPDATE 将触发更新元素
 		updateDom(fiber.dom, fiber.alternate.props, fiber.props);
 	} else if (fiber.effectTag === 'DELETION') {
 		// fiber 标识为 DELETION 将触发删除元素
-		domParent.removeChild(fiber.dom);
+		commitDeletion(fiber, domParent);
 	}
 
 	fiber.child && commitWork(fiber.child);
 	fiber.sibling && commitWork(fiber.sibling);
+}
+
+function commitDeletion(fiber: Fiber, domParent: any) {
+	if (fiber.dom) {
+		// 如果 fiber 存在 DOM 组件就将 DOM 从父元素中移除
+		domParent.removeChild(fiber.dom);
+	} else {
+		// 否则递归移除子元素
+		if (fiber?.child) commitDeletion(fiber?.child, domParent);
+	}
 }
 
 function render(element: any, container: HTMLElement | null) {
@@ -190,27 +208,48 @@ function workLoop(deadline: IdleDeadline) {
 
 requestIdleCallback(workLoop);
 
-function performUnitOfWork(fiber: Fiber): any {
-	// 创建 fiber 的 DOM 对象
-	if (!fiber.dom) {
-		fiber.dom = createDom(fiber);
+function performUnitOfWork(fiber: any): any {
+	// 判断是否是函数组件，函数组件和主组件使用不同逻辑处理
+	const isFunctionComponent = fiber.type instanceof Function;
+	if (isFunctionComponent) {
+		updateFunctionComponent(fiber);
+	} else {
+		updateHostComponent(fiber);
 	}
 
-	// 给每个子元素创建一个 Fiber 对象
-	const elements = fiber.props?.children || [];
-	reconcileChildren(fiber, elements);
-
 	if (fiber.child) {
+		// 存在子元素，下一个任务就是处理子元素
 		return fiber.child;
 	}
 
 	let nextFiber: any = fiber;
 	while (nextFiber) {
 		if (nextFiber.sibling) {
+			// 存在兄弟元素，下一个任务就是处理兄弟元素
 			return nextFiber.sibling;
 		}
+
+		// 当兄弟元素处理完了，利用循环向上找父元素的兄弟元素
 		nextFiber = nextFiber.parent;
 	}
+}
+
+function updateHostComponent(fiber: any) {
+	if (!fiber.dom) {
+		// fiber 不存在 DOM 对象就先创建
+		fiber.dom = createDom(fiber);
+	}
+
+	// 协调子元素
+	reconcileChildren(fiber, fiber?.props?.children);
+}
+
+function updateFunctionComponent(fiber: any) {
+	// 通过运行函数获得函数组件中的元素
+	const children = [fiber.type(fiber?.props)];
+
+	// 协调子元素
+	reconcileChildren(fiber, children);
 }
 
 function reconcileChildren(wipFiber: Fiber, elements: any[]) {
@@ -292,21 +331,32 @@ const BinReact = {
 /** @jsxRuntime classic */
 /** @jsx BinReact.createElement */
 
-const updateValue = (e: any) => {
-	rerender(e.target.value);
-};
-
-const container = document.getElementById('root');
-// ReactDOM.render(element, container);
-
-const rerender = (value: any) => {
-	const element = (
+function App(props: any) {
+	const posts = [1, 2, 3, 4];
+	return (
 		<div>
-			<input onInput={updateValue} value={value} />
-			<h2>Hello {value}</h2>
+			<h1>Hello {props.name}</h1>
 		</div>
 	);
-	BinReact.render(element, container);
-};
+}
+const element = <App name="bin" />;
+const container = document.getElementById('root');
+BinReact.render(element, container);
 
-rerender('Bin');
+// const updateValue = (e: any) => {
+// 	rerender(e.target.value);
+// };
+
+// const container = document.getElementById('root');
+// // ReactDOM.render(element, container);
+
+// const rerender = (value: any) => {
+// 	const element = (
+// 		<div>
+// 			<input onInput={updateValue} value={value} />
+// 			<h2>Hello {value}</h2>
+// 		</div>
+// 	);
+// 	BinReact.render(element, container);
+// };
+// rerender('Bin');
