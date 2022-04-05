@@ -244,12 +244,48 @@ function updateHostComponent(fiber: any) {
 	reconcileChildren(fiber, fiber?.props?.children);
 }
 
+let wipFiber: any = null;
+let hooksIndex: any = null;
+
 function updateFunctionComponent(fiber: any) {
+	wipFiber = fiber;
+	hooksIndex = 0;
+	wipFiber.hooks = [];
+
 	// 通过运行函数获得函数组件中的元素
 	const children = [fiber.type(fiber?.props)];
 
 	// 协调子元素
 	reconcileChildren(fiber, children);
+}
+
+function useState<T>(initial: T) {
+	const oldHook = wipFiber.alternate && wipFiber.alternate.hooks && wipFiber.alternate.hooks[hooksIndex];
+	const hook = {
+		state: oldHook ? oldHook.state : initial,
+		queue: [],
+	};
+
+	const actions = oldHook ? oldHook.queue : [];
+	actions.forEach((action: any) => {
+		hook.state = action(hook.state);
+	});
+
+	const setState = (action: T) => {
+		hook.queue.push(action as never);
+		wipRoot = {
+			dom: currentRoot.dom,
+			props: currentRoot.props,
+			alternate: currentRoot,
+		};
+
+		nextUnitOfWork = wipRoot;
+		deletions = [];
+	};
+
+	wipFiber.hooks.push(hook);
+	hooksIndex++;
+	return [hook.state, setState];
 }
 
 function reconcileChildren(wipFiber: Fiber, elements: any[]) {
@@ -317,6 +353,7 @@ function reconcileChildren(wipFiber: Fiber, elements: any[]) {
 const BinReact = {
 	createElement,
 	render,
+	useState,
 };
 
 // const element = BinReact.createElement(
@@ -332,10 +369,12 @@ const BinReact = {
 /** @jsx BinReact.createElement */
 
 function App(props: any) {
-	const posts = [1, 2, 3, 4];
+	const [value, setValue] = BinReact.useState(1);
 	return (
 		<div>
-			<h1>Hello {props.name}</h1>
+			<h1 onClick={() => setValue((value: number) => value + 1)}>
+				Hello {props.name}, you click me count is {value}
+			</h1>
 		</div>
 	);
 }
